@@ -1,0 +1,133 @@
+#!/usr/bin/python3
+#	routerbootstrap - Bootstrap a Debian image for use in a router
+#	Copyright (C) 2019-2019 Johannes Bauer
+#
+#	This file is part of routerbootstrap.
+#
+#	routerbootstrap is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	routerbootstrap is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with routerbootstrap; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+import os
+import sys
+import tempfile
+import subprocess
+import http.server
+import socketserver
+import random
+import re
+from FriendlyArgumentParser import FriendlyArgumentParser
+
+class RouterBootstrapper():
+	def __init__(self, args):
+		self._args = args
+		self._repacked_iso_name = None
+		self._webserver_port = None
+
+	def _execute(self, cmd):
+		print(" ".join(cmd))
+		subprocess.check_call(cmd)
+
+	def _run_installation(self):
+		cmd = [ "qemu-system-x86_64" ]
+		cmd += [ "-drive", "format=raw,file=%s" % (self._args.disk_image) ]
+		cmd += [ "-cdrom", self._repacked_iso_name ]
+		cmd += [ "-m", "size=%d" % (self._args.memory) ]
+		cmd += [ "-net", "nic,netdev=net0,model=e1000", "-netdev", "user,id=net0,net=192.168.42.0/24,dhcpstart=192.168.42.100,host=192.168.42.1" ]
+		cmd += [ "-enable-kvm" ]
+		cmd += [ "-no-reboot" ]
+		self._execute(cmd)
+	
+	def _create_empty_disk_image(self):
+		with open(self._args.disk_image, "wb") as f:
+			f.truncate(self._args.disk * 1024 * 1024)
+		self._run_installation()
+
+	def _patch_file(self, filename, regex, replacement):
+		with open(filename) as f:
+			text = f.read()
+		text = re.sub(regex, replacement, text)
+#		print("*"*120)
+#		print(text)
+#		print("*"*120)
+		with open(filename, "w") as f:
+			f.write(text)
+
+	def _add_preseed(self, isodir):
+		self._patch_file(isodir + "/isolinux/isolinux.cfg", r"default vesamenu.c32", r"default auto")
+		if self._args.verbose:
+			self._patch_file(isodir + "/isolinux/adtxt.cfg", r"[ \t]*append\s+(.*)", r"    append \1 url=http://192.168.42.1:%d/preseed.txt DEBCONF_DEBUG=5" % (self._webserver_port))
+		else:
+			self._patch_file(isodir + "/isolinux/adtxt.cfg", r"[ \t]*append\s+(.*)", r"    append \1 url=http://192.168.42.1:%d/preseed.txt" % (self._webserver_port))
+
+	def _repack_iso(self):
+		with tempfile.TemporaryDirectory(prefix = "rtrbs_") as tmpdir:
+			# Extract ISO contents
+			self._execute([ "7z", "x", "-o%s" % (tmpdir), self._args.netinst_iso ])
+
+			# Do preseed modification
+			self._add_preseed(tmpdir)
+
+			# Repack ISO
+			with tempfile.NamedTemporaryFile(prefix = "rtrbs_", suffix = ".iso") as repacked_iso:
+				self._repacked_iso_name = repacked_iso.name
+				self._execute([ "mkisofs", "-r", "-input-charset", "utf-8", "-J", "-b", "isolinux/isolinux.bin", "-c", "isolinux/boot.cat", "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table", "-o", self._repacked_iso_name, tmpdir ])
+				self._create_empty_disk_image()
+		
+	def _start_webserver(self):
+		try:
+			webserver_process = None
+			for retry in range(5):
+				self._webserver_port = random.randint(10000, 64000)
+				print("Trying to bind local webserver on port %d" % (self._webserver_port))
+				webserver_process = subprocess.Popen([ "python3", "-m", "http.server", str(self._webserver_port) ], cwd = "preseed/")
+				try:
+					webserver_process.wait(0.5)
+				except subprocess.TimeoutExpired:
+					# Process is still alive!
+					break
+			else:
+				webserver_process = None
+				print("Could not find any port to bind local webserver to.", file = sys.stderr)
+				sys.exit(1)
+			self._repack_iso()
+		finally:
+			if webserver_process is not None:
+				webserver_process.kill()
+	
+	def _check_prerequisites(self):
+		if os.path.exists(self._args.disk_image):
+			if (not self._args.force):
+				print("Disk image already exists, not overwriting: %s" % (self._args.disk_image))
+				sys.exit(1)
+			else:
+				os.unlink(self._args.disk_image)
+		self._start_webserver()
+
+	def run(self):
+		self._check_prerequisites()
+
+
+parser = FriendlyArgumentParser()
+parser.add_argument("--disk", metavar = "mib", type = int, default = 1024 * 8, help = "Amount of initial disk space given to the VM, in MiB. Defaults to %(default)d MiB.")
+parser.add_argument("--memory", metavar = "mib", type = int, default = 1024, help = "Amount of memory given to the VM, in MiB. Defaults to %(default)d MiB.")
+parser.add_argument("-f", "--force", action = "store_true", help = "Overwrite output files if they exist")
+parser.add_argument("-v", "--verbose", action = "store_true", help = "Be more verbose")
+parser.add_argument("netinst_iso", metavar = "netinst_iso", type = str, help = "ISO image of the Debian netinst image")
+parser.add_argument("disk_image", metavar = "filename", type = str, help = "Filename of the dd-able hard disk image to create")
+args = parser.parse_args(sys.argv[1:])
+
+rtrbs = RouterBootstrapper(args)
+rtrbs.run()

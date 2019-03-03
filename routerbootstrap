@@ -157,7 +157,6 @@ class RouterBootstrapper():
 		for i in range(0, 120, check_interval):
 			if self._check_local_ssh(local_port):
 				self._postinstall_run_ssh_cmds(local_port)
-				input("RAN")
 				return
 			time.sleep(check_interval)
 		raise Exception("Postinstall failed, could not connect to ssh.")
@@ -174,6 +173,13 @@ class RouterBootstrapper():
 			proc = None
 			proc = subprocess.Popen(cmd)
 			self._postinstall(local_port)			
+				
+			while True:
+				try:
+					proc.wait(5)
+					break
+				except subprocess.TimeoutExpired:
+					pass
 		finally:
 			if proc is not None:
 				proc.kill()

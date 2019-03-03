@@ -1,4 +1,4 @@
-# vim: syntax=dosini
+# vim: syntax=dosini tw=0
 #### Contents of the preconfiguration file (for stretch)
 ### Localization
 # Preseeding only locale sets language, country and locale.
@@ -193,7 +193,7 @@ d-i partman-auto/expert_recipe string                         \
                       method{ format } format{ }              \
                       use_filesystem{ } filesystem{ ext4 }    \
                       mountpoint{ / }                         \
-              .                                               \
+              .
 
 
 # The full recipe format is documented in the file partman-auto-recipe.txt
@@ -311,9 +311,11 @@ d-i partman/confirm_nooverwrite boolean true
 
 ### Package selection
 #tasksel tasksel/first multiselect standard, web-server, kde-desktop
+tasksel tasksel/first multiselect standard, ssh-server
 
 # Individual additional packages to install
-#d-i pkgsel/include string openssh-server build-essential
+d-i pkgsel/include string rsync
+
 # Whether to upgrade packages after debootstrap.
 # Allowed values: none, safe-upgrade, full-upgrade
 #d-i pkgsel/upgrade select none
@@ -343,7 +345,7 @@ d-i grub-installer/with_other_os boolean true
 
 # Due notably to potential USB sticks, the location of the MBR can not be
 # determined safely in general, so this needs to be specified:
-#d-i grub-installer/bootdev  string /dev/sda
+d-i grub-installer/bootdev  string /dev/sda
 # To install to the first device (assuming it is not a USB stick):
 #d-i grub-installer/bootdev  string default
 
@@ -418,3 +420,4 @@ d-i finish-install/reboot_in_progress note
 # packages and run commands in the target system.
 #d-i preseed/late_command string apt-install zsh; in-target chsh -s /bin/zsh
 
+d-i preseed/late_command string in-target mkdir -p /root/.ssh; in-target sh -c 'echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILiqn4AB3/vTlg+cHqzZFUqm0Ai7b2a/kZpU5j2Ix3ny INSTALLATION_KEY_REMOVEME" >/root/.ssh/authorized_keys'

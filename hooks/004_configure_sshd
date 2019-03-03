@@ -1,0 +1,40 @@
+#!/bin/bash -e
+#	routerbootstrap - Bootstrap a Debian image for use in a router
+#	Copyright (C) 2019-2019 Johannes Bauer
+#
+#	This file is part of routerbootstrap.
+#
+#	routerbootstrap is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	routerbootstrap is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with routerbootstrap; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+for KEYWORD in PasswordAuthentication KexAlgorithms Ciphers MACs ClientAliveInterval ClientAliveCountMax; do
+	sed '/^#\?\s*'${KEYWORD}'.*/d' -i /etc/ssh/sshd_config
+done
+
+cat >>/etc/ssh/sshd_config <<EOF
+
+PasswordAuthentication no
+
+KexAlgorithms curve25519-sha256@libssh.org,ecdh-sha2-nistp384,ecdh-sha2-nistp521,ecdh-sha2-nistp256
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes256-ctr
+MACs umac-64-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com
+
+ClientAliveInterval 30
+ClientAliveCountMax 4
+EOF
+
+# Pretty up the config file
+sed ':a; N; $!ba; s/\n\n\n\+/\n/g;' -i /etc/ssh/sshd_config

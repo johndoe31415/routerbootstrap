@@ -22,12 +22,14 @@
 
 import os
 import sys
+import time
 import tempfile
 import subprocess
 import http.server
 import socketserver
 import random
 import re
+import json
 from FriendlyArgumentParser import FriendlyArgumentParser
 
 class RouterBootstrapper():
@@ -35,6 +37,20 @@ class RouterBootstrapper():
 		self._args = args
 		self._repacked_iso_name = None
 		self._webserver_port = None
+		with open(args.config) as f:
+			self._config = json.load(f)
+		self._interpreted_config = self._interpret_config()
+
+	def _interpret_config(self):
+		interpreted = { 
+			"sshkeys":		[ ],
+		}
+		for filename in self._config["sshkeys"]:
+			filename = os.path.expanduser(filename)
+			with open(filename) as f:
+				keys = f.read().strip("\r\n").split("\n")
+				interpreted["sshkeys"] += keys
+		return interpreted
 
 	def _execute(self, cmd):
 		print(" ".join(cmd))
@@ -116,13 +132,64 @@ class RouterBootstrapper():
 				os.unlink(self._args.disk_image)
 		self._start_webserver()
 
-	def run(self):
+	def _qemu_bootstrap_installation(self):
 		self._check_prerequisites()
+		
+	def _postinstall_run_ssh_cmds(self, local_port):
+		subprocess.check_call([ "rsync", "-e", "ssh -p %d -i installation_key -o StrictHostKeyChecking=false" % (local_port), "--delete", "-a", "hooks", "root@127.0.0.1:/" ])
+		with tempfile.NamedTemporaryFile("w") as f:
+			json.dump(self._config, f)
+			f.flush()
+			subprocess.check_call([ "scp", "-i", "installation_key", "-P", str(local_port), "-o", "StrictHostKeyChecking=false", f.name, "root@127.0.0.1:/hooks/config.json" ])
+		with tempfile.NamedTemporaryFile("w") as f:
+			json.dump(self._interpreted_config, f)
+			f.flush()
+			subprocess.check_call([ "scp", "-i", "installation_key", "-P", str(local_port), "-o", "StrictHostKeyChecking=false", f.name, "root@127.0.0.1:/hooks/interpreted_config.json" ])
 
+		subprocess.check_call([ "ssh", "-i", "installation_key", "-p", str(local_port), "-o", "StrictHostKeyChecking=false", "root@127.0.0.1", "/hooks/run" ])
+
+	def _check_local_ssh(self, local_port):
+		output = subprocess.run([ "ssh", "-i", "installation_key", "-p", str(local_port), "-o", "StrictHostKeyChecking=false", "root@127.0.0.1", "echo qtmmhmf | tr a-z b-za" ], stdout = subprocess.PIPE)
+		return b"running" in output.stdout
+
+	def _postinstall(self, local_port):
+		check_interval = 5
+		for i in range(0, 120, check_interval):
+			if self._check_local_ssh(local_port):
+				self._postinstall_run_ssh_cmds(local_port)
+				input("RAN")
+				return
+			time.sleep(check_interval)
+		raise Exception("Postinstall failed, could not connect to ssh.")
+
+	def _qemu_run_system(self):
+		try:
+			local_port = 47392
+			cmd = [ "qemu-system-x86_64" ]
+			cmd += [ "-drive", "format=raw,file=%s" % (self._args.disk_image) ]
+			cmd += [ "-m", "size=%d" % (self._args.memory) ]
+			cmd += [ "-net", "nic,netdev=net0,model=e1000", "-netdev", "user,id=net0,net=192.168.42.0/24,dhcpstart=192.168.42.100,host=192.168.42.1,hostfwd=tcp::%d-:22" % (local_port) ]
+			cmd += [ "-enable-kvm" ]
+			cmd += [ "-no-reboot" ]
+			proc = None
+			proc = subprocess.Popen(cmd)
+			self._postinstall(local_port)			
+		finally:
+			if proc is not None:
+				proc.kill()
+	
+	def run(self):
+		if not self._args.skip_bootstrap:
+			self._qemu_bootstrap_installation()
+		if not self._args.skip_postinstall:
+			self._qemu_run_system()
 
 parser = FriendlyArgumentParser()
+parser.add_argument("--skip-bootstrap", action = "store_true", help = "This option skips the Qemu bootstrapping phase and goes right into the post-installation.")
+parser.add_argument("--skip-postinstall", action = "store_true", help = "This option skips the Qemu post-installation phase.")
 parser.add_argument("--disk", metavar = "mib", type = int, default = 1024 * 8, help = "Amount of initial disk space given to the VM, in MiB. Defaults to %(default)d MiB.")
 parser.add_argument("--memory", metavar = "mib", type = int, default = 1024, help = "Amount of memory given to the VM, in MiB. Defaults to %(default)d MiB.")
+parser.add_argument("-c", "--config", metavar = "filename", default = "config.json", help = "Configuration file to use. Defaults to %(default)s.")
 parser.add_argument("-f", "--force", action = "store_true", help = "Overwrite output files if they exist")
 parser.add_argument("-v", "--verbose", action = "store_true", help = "Be more verbose")
 parser.add_argument("netinst_iso", metavar = "netinst_iso", type = str, help = "ISO image of the Debian netinst image")

@@ -1,0 +1,10 @@
+#!/bin/bash
+#
+#
+
+for HOOK in /hooks/[0-9][0-9][0-9]_*; do
+	if [ -x "$HOOK" ] && [ "$HOOK" != "/hooks/run" ]; then
+		echo "$HOOK"
+		"$HOOK" "/hooks" "/hooks/config.json" "/hooks/interpreted_config.json"
+	fi
+done

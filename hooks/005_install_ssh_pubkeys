@@ -1,0 +1,43 @@
+#!/usr/bin/python3
+#	routerbootstrap - Bootstrap a Debian image for use in a router
+#	Copyright (C) 2019-2019 Johannes Bauer
+#
+#	This file is part of routerbootstrap.
+#
+#	routerbootstrap is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	routerbootstrap is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with routerbootstrap; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+import json
+import shutil
+import os
+import contextlib
+import sys
+
+(hook_dir, config_filename, interpreted_config_filename) = sys.argv[1:]
+
+with contextlib.suppress(FileExistsError):
+	os.makedirs("/root/.ssh")
+	os.chmod("/root/.ssh", 0o700)
+
+with open(interpreted_config_filename) as f:
+	config = json.load(f)
+
+sshkeys = config.get("sshkeys", [ ])
+if len(sshkeys) > 0:
+	with open("/root/.ssh/authorized_keys", "w") as f:
+		f.write("\n".join(sshkeys))
+		f.write("\n")
+	os.chmod("/root/.ssh/authorized_keys", 0o600)
